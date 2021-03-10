@@ -32,6 +32,7 @@ const EVENT = {
 const imageManagerSM = {
   id: 'imageManagerSM',
   initial: STATE.LOADING,
+  //context is the new state
   context: {
     fileInfoList: [],
     fileInfoCount: 0,
