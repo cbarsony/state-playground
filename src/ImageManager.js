@@ -1,4 +1,4 @@
-import {Fragment, useEffect, useRef} from 'react'
+import {Fragment, useState, useEffect} from 'react'
 import update from 'immutability-helper'
 import _ from 'lodash'
 import {Machine, assign} from 'xstate'
@@ -9,83 +9,108 @@ import {server} from './server'
 const STATE = {
   LOADING: 'LOADING',
   LISTING: 'LISTING',
-  CHANGING_META_FILTER: 'CHANGING_META_FILTER',
   ADDING_META_FILTER: 'ADDING_META_FILTER',
-  EDITING_META_FILTER: 'EDITING_META_FILTER',
   DELETING_META_FILTER: 'DELETING_META_FILTER',
-  CHANGING_FILE_META: 'CHANGING_FILE_META',
   ADDING_FILE_META: 'ADDING_FILE_META',
-  EDITING_FILE_META: 'EDITING_FILE_META',
+  DELETING_FILE_META: 'DELETING_FILE_META',
+  UPDATING_FILE_META: 'UPDATING_FILE_META',
 }
 
 const EVENT = {
-  LOADED: 'LOADED',
+  READY: 'READY',
+  CANCEL: 'CANCEL',
   ADD_META_FILTER: 'ADD_META_FILTER',
-  EDIT_META_FILTER: 'EDIT_META_FILTER',
   DELETE_META_FILTER: 'DELETE_META_FILTER',
   ADD_FILE_META: 'ADD_FILE_META',
-  EDIT_FILE_META: 'EDIT_FILE_META',
   DELETE_FILE_META: 'DELETE_FILE_META',
-  SUCCESS: 'SUCCESS',
+  SELECT_FILE: 'SELECT_FILE',
 }
 
 const imageManagerSM = {
   id: 'imageManagerSM',
   initial: STATE.LOADING,
-  //context is the new state
   context: {
     fileInfoList: [],
     fileInfoCount: 0,
     selectedImageIdxList: [],
     metaFilterList: [{
-      key: 'job',
-      value: 'job1',
+      key: 'tk',
+      value: 'tv',
     }],
     fileNameFilter: '',
   },
   states: {
     [STATE.LOADING]: {
-      id: STATE.LOADING,
       invoke: {
         src: 'getImages',
         onDone: STATE.LISTING,
       },
-      exit: assign((context, {data}) => data)
+      entry: assign(() => ({selectedImageIdxList: []})),
+      exit: assign((context, {data}) => data),
     },
     [STATE.LISTING]: {
       on: {
-        [EVENT.ADD_META_FILTER]: `${STATE.CHANGING_META_FILTER}.${STATE.ADDING_META_FILTER}`,
-        [EVENT.DELETE_META_FILTER]: `${STATE.CHANGING_META_FILTER}.${STATE.DELETING_META_FILTER}`,
+        [EVENT.ADD_META_FILTER]: STATE.ADDING_META_FILTER,
+        [EVENT.DELETE_META_FILTER]: STATE.DELETING_META_FILTER,
+        [EVENT.SELECT_FILE]: {
+          actions: [assign((context, {fileInfoIdx}) => {
+            let selectedImageIdxList
+
+            if(_.includes(context.selectedImageIdxList, fileInfoIdx)) {
+              const selectedIdx = context.selectedImageIdxList.findIndex(idx => idx === fileInfoIdx)
+
+              selectedImageIdxList = update(context.selectedImageIdxList, {
+                $splice: [[selectedIdx, 1]],
+              })
+            }
+            else {
+              selectedImageIdxList = update(context.selectedImageIdxList, {
+                $push: [fileInfoIdx],
+              })
+            }
+
+            return {selectedImageIdxList}
+          })],
+        },
+        [EVENT.ADD_FILE_META]: STATE.ADDING_FILE_META,
       },
     },
-    [STATE.CHANGING_META_FILTER]: {
-      states: {
-        [STATE.ADDING_META_FILTER]: {
-          exit: assign((context, {data}) => {
-            const metaFilterList = update(context.metaFilterList, {
-              $push: [data],
-            })
+    [STATE.ADDING_META_FILTER]: {
+      on: {
+        [EVENT.READY]: STATE.LOADING,
+        [EVENT.CANCEL]: STATE.LISTING,
+      },
+      exit: assign((context, {data}) => {
+        if(data !== 'cancel') {
+          const metaFilterList = update(context.metaFilterList, {$push: [data]})
 
-            return {metaFilterList}
-          }),
-          on: {
-            [EVENT.SUCCESS]: `#${STATE.LOADING}`,
-          },
-        },
-        [STATE.EDITING_META_FILTER]: {},
-        [STATE.DELETING_META_FILTER]: {
-          always: `#${STATE.LOADING}`,
-          entry: assign((context, {data}) => {
-            const metaFilterList = update(context.metaFilterList, {
-              $splice: [[data.metaFilterIdxToRemove, 1]],
-            })
+          return {metaFilterList}
+        }
+      }),
+    },
+    [STATE.DELETING_META_FILTER]: {
+      always: STATE.LOADING,
+      entry: assign((context, {data}) => {
+        const metaFilterList = update(context.metaFilterList, {
+          $splice: [[data.metaFilterIdxToRemove, 1]],
+        })
 
-            return {metaFilterList}
-          }),
-        },
+        return {metaFilterList}
+      }),
+    },
+    [STATE.ADDING_FILE_META]: {
+      on: {
+        [EVENT.READY]: STATE.UPDATING_FILE_META,
+        [EVENT.CANCEL]: STATE.UPDATING_FILE_META,
       },
     },
-    [STATE.CHANGING_FILE_META]: {},
+    [STATE.UPDATING_FILE_META]: {
+      invoke: {
+        src: 'updateFileMeta',
+        onDone: STATE.LOADING,
+      },
+      exit: assign((context, {data}) => data),
+    },
   },
 }
 
@@ -99,32 +124,41 @@ const imageManagerSMOptions = {
         fileInfoCount: fileInfoListPayload.fileInfoCount,
       }
     },
+    updateFileMeta: async(context, {meta}) => {
+      const images = context.fileInfoList
+        .filter((fileInfo, fileInfoIdx) => _.includes(context.selectedImageIdxList, fileInfoIdx))
+        .map(fileInfo => fileInfo.fileName)
+
+      await server.updateFileMeta(images, meta)
+    },
   },
 }
 
 export const ImageManager = () => {
-  const metaFilterKeyInputRef = useRef(null)
-  const metaFilterValueInputRef = useRef(null)
   const [state, send, service] = useMachine(Machine(imageManagerSM, imageManagerSMOptions))
+
+  const [metaInputKey, setMetaInputKey] = useState('')
+  const [metaInputValue, setMetaInputValue] = useState('')
+
+  const [fileMetaInputKey, setFileMetaInputKey] = useState('')
+  const [fileMetaInputValue, setFileMetaInputValue] = useState('')
+
+  const isOKMetaFilterButtonDisabled = () => metaInputKey === '' || metaInputValue === ''
+  const isOKFileMetaButtonDisabled = () => fileMetaInputKey === '' || fileMetaInputValue === ''
+
+  /******** logging **********/
   useEffect(() => service.subscribe(state => console.log(state)), [service])
 
   return (
     <Fragment>
-      <div className="SidebarContent">
+      <div id="Sidebar">
         <div>
+          <h3>Metadata Filter</h3>
           <div>
             {state.context.metaFilterList.map((metaFilter, metaFilterIdx) => (
               <div key={metaFilterIdx}>
                 <span>{metaFilter.key}</span>:
-                <span
-                  onDoubleClick={() => {
-                    send(EVENT.EDIT_META_FILTER, {
-                      data: {
-                        metaFilterIdx,
-                      }
-                    })
-                  }}
-                >{metaFilter.value}</span>
+                <span>{metaFilter.value}</span>
                 <button
                   onClick={() => {
                     send(EVENT.DELETE_META_FILTER, {
@@ -139,15 +173,36 @@ export const ImageManager = () => {
           </div>
           {state.matches(STATE.ADDING_META_FILTER) ? (
             <div>
-              <input type="text" ref={metaFilterKeyInputRef}/>
-              <input type="text" ref={metaFilterValueInputRef}/>
-              <button onClick={() => {
-                if(metaFilterKeyInputRef === '' && metaFilterValueInputRef === '') {
-                  return
-                }
-
-                send(EVENT.SUCCESS)
-              }}>OK</button>
+              <input
+                type="text"
+                value={metaInputKey}
+                onChange={e => setMetaInputKey(e.target.value)}
+              />
+              <input
+                type="text"
+                value={metaInputValue}
+                onChange={e => setMetaInputValue(e.target.value)}
+              />
+              <button
+                onClick={() => {
+                  send(EVENT.READY, {
+                    data: {
+                      key: metaInputKey,
+                      value: metaInputValue,
+                    },
+                  })
+                  setMetaInputKey('')
+                  setMetaInputValue('')
+                }}
+                disabled={isOKMetaFilterButtonDisabled()}
+              >OK</button>
+              <button
+                onClick={() => {
+                  send(EVENT.CANCEL, {data: 'cancel'})
+                  setMetaInputKey('')
+                  setMetaInputValue('')
+                }}
+              >Cancel</button>
             </div>
           ) : (
             <button
@@ -163,37 +218,62 @@ export const ImageManager = () => {
         </div>
 
         <div>
-          <div>Meta...</div>
-        </div>
-
-        <div>
-          <div>Under construction...</div>
+          <h3>File Metadata</h3>
+          {state.context.selectedImageIdxList.length === 1 && state.context.fileInfoList[state.context.selectedImageIdxList[0]].metaList.map((meta, metaIdx) => (
+            <div key={metaIdx}>
+              key: {meta.key}, value: {meta.value}
+            </div>
+          ))}
+          {state.context.selectedImageIdxList.length > 0 && (
+            <button
+              onClick={() => send(EVENT.ADD_FILE_META)}
+            >Add Metadata to file</button>
+          )}
+          {state.matches(STATE.ADDING_FILE_META) && (
+            <div>
+              <input
+                type="text"
+                value={fileMetaInputKey}
+                onChange={e => setFileMetaInputKey(e.target.value)}
+              />
+              <input
+                type="text"
+                value={fileMetaInputValue}
+                onChange={e => setFileMetaInputValue(e.target.value)}
+              />
+              <button
+                onClick={() => {
+                  send(EVENT.READY, {
+                    meta: {
+                      key: fileMetaInputKey,
+                      value: fileMetaInputValue,
+                    },
+                  })
+                  setFileMetaInputKey('')
+                  setFileMetaInputValue('')
+                }}
+                disabled={isOKFileMetaButtonDisabled()}
+              >OK</button>
+              <button
+                onClick={() => {
+                  send(EVENT.CANCEL, {data: 'cancel'})
+                  setFileMetaInputKey('')
+                  setFileMetaInputValue('')
+                }}
+              >Cancel</button>
+            </div>
+          )}
         </div>
 
       </div>
       <div id="ImageManager">
+        {state.context.fileInfoList.length === 0 && <div>empty image list...</div>}
         {state.matches(STATE.LOADING) ? <div>loading...</div> : state.context.fileInfoList.map((fileInfo, fileInfoIdx) => (
           <div
             className="image"
             key={fileInfoIdx}
-            onClick={() => {
-              if(_.includes(state.context.selectedImageIdxList, fileInfoIdx)) {
-                //const selectedIdx = state.context.selectedImageIdxList.findIndex(idx => idx === fileInfoIdx)
-
-                /*this.setState(state => update(state, {
-                 selectedImageIdxList: {
-                 $splice: [[selectedIdx, 1]],
-                 },
-                 }))*/
-              }
-              else {
-                /*this.setState(state => update(state, {
-                 selectedImageIdxList: {
-                 $push: [fileInfoIdx],
-                 },
-                 }))*/
-              }
-            }}>
+            onClick={() => send(EVENT.SELECT_FILE, {fileInfoIdx})}
+          >
             <span className={_.includes(state.context.selectedImageIdxList, fileInfoIdx) ? 'active' : ''}>{fileInfo.fileName}</span>
           </div>
         ))}

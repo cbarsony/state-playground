@@ -49,6 +49,17 @@ const doMetaMatch = (metaFilters, fileMetaList) => {
   return result
 }
 
+const editImageMeta = (image, meta) => {
+  const existingImageMeta = image.metaList.find(imageMeta => imageMeta.key === meta.key)
+
+  if(existingImageMeta) {
+    existingImageMeta.value = meta.value
+  }
+  else {
+    image.metaList.push(meta)
+  }
+}
+
 export const server = {
   getImages: async(fileNameFilter, metaFilters) => {
     return new Promise(resolve => {
@@ -62,6 +73,13 @@ export const server = {
           fileInfoCount: resultList.length,
         })
       }, 500)
+    })
+  },
+  updateFileMeta: async(fileNameList, meta) => {
+    mockImages.forEach(image => {
+      if(_.includes(fileNameList, image.fileName)) {
+        editImageMeta(image, meta)
+      }
     })
   },
 }
