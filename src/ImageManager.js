@@ -50,9 +50,8 @@ const imageManagerSM = {
     },
     [STATE.LISTING]: {
       on: {
-        [EVENT.ADD_META_FILTER]: STATE.ADDING_META_FILTER,
-        [EVENT.DELETE_META_FILTER]: STATE.DELETING_META_FILTER,
         [EVENT.SELECT_FILE]: {
+          //could be simplified with SELECT/DESELECT_FILE
           actions: [assign((context, {fileInfoIdx}) => {
             let selectedImageIdxList
 
@@ -72,21 +71,28 @@ const imageManagerSM = {
             return {selectedImageIdxList}
           })],
         },
+
+        [EVENT.ADD_META_FILTER]: STATE.ADDING_META_FILTER,
+        [EVENT.DELETE_META_FILTER]: STATE.DELETING_META_FILTER,
+
         [EVENT.ADD_FILE_META]: STATE.ADDING_FILE_META,
+        [EVENT.DELETE_FILE_META]: STATE.DELETING_FILE_META,
       },
     },
     [STATE.ADDING_META_FILTER]: {
       on: {
-        [EVENT.READY]: STATE.LOADING,
+        [EVENT.READY]: {
+          target: STATE.LOADING,
+          actions: [
+            assign((context, {data}) => {
+              const metaFilterList = update(context.metaFilterList, {$push: [data]})
+
+              return {metaFilterList}
+            }),
+          ],
+        },
         [EVENT.CANCEL]: STATE.LISTING,
       },
-      exit: assign((context, {data}) => {
-        if(data !== 'cancel') {
-          const metaFilterList = update(context.metaFilterList, {$push: [data]})
-
-          return {metaFilterList}
-        }
-      }),
     },
     [STATE.DELETING_META_FILTER]: {
       always: STATE.LOADING,
@@ -111,6 +117,12 @@ const imageManagerSM = {
       },
       exit: assign((context, {data}) => data),
     },
+    [STATE.DELETING_FILE_META]: {
+      invoke: {
+        src: 'deleteFileMeta',
+        onDone: STATE.LOADING,
+      },
+    },
   },
 }
 
@@ -123,6 +135,12 @@ const imageManagerSMOptions = {
         fileInfoList: fileInfoListPayload.fileInfoList,
         fileInfoCount: fileInfoListPayload.fileInfoCount,
       }
+    },
+    deleteFileMeta: async(context, {metaIdx}) => {
+      const fileName = context.fileInfoList[context.selectedImageIdxList[0]].fileName
+      const metaKey = context.fileInfoList[context.selectedImageIdxList[0]].metaList[metaIdx].key
+
+      await server.deleteFileMeta(fileName, metaKey)
     },
     updateFileMeta: async(context, {meta}) => {
       const images = context.fileInfoList
@@ -221,7 +239,10 @@ export const ImageManager = () => {
           <h3>File Metadata</h3>
           {state.context.selectedImageIdxList.length === 1 && state.context.fileInfoList[state.context.selectedImageIdxList[0]].metaList.map((meta, metaIdx) => (
             <div key={metaIdx}>
-              key: {meta.key}, value: {meta.value}
+              {`${meta.key}: ${meta.value}`}
+              <button
+                onClick={() => send(EVENT.DELETE_FILE_META, {metaIdx})}
+              >X</button>
             </div>
           ))}
           {state.context.selectedImageIdxList.length > 0 && (
