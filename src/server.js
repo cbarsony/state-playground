@@ -1,5 +1,7 @@
 import _ from 'lodash'
 
+const delay = 500 //ms
+
 const mockImages = _.range(0, 100).map(n => ({
   fileName: `img_${n}.jpg`,
   thumb: `https://picsum.photos/id/${n}/100`,
@@ -72,7 +74,17 @@ export const server = {
           fileInfoList: resultList,
           fileInfoCount: resultList.length,
         })
-      }, 500)
+      }, delay)
+    })
+  },
+  deleteFileMeta: async(fileName, metaKey) => {
+    return new Promise(resolve => {
+      setTimeout(() => {
+        const file = mockImages.find(i => i.fileName === fileName)
+        _.remove(file.metaList, meta => meta.key === metaKey)
+
+        resolve()
+      }, delay)
     })
   },
   updateFileMeta: async(fileNameList, meta) => {
